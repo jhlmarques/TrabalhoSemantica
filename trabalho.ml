@@ -28,7 +28,10 @@ type tipo =
   | TyFn     of tipo * tipo
   | TyPair   of tipo * tipo 
   | TyVar    of int   (* variáveis de tipo -- números *)
-                      
+
+(* TRABALHO: NOVOS TIPOS *)
+  | TyList of tipo
+                           
 type politipo = (int list) * tipo
   
 
@@ -53,7 +56,8 @@ let rec tipo_str (tp:tipo) : string =
   | TyFn   (t1,t2)  -> "("  ^ (tipo_str t1) ^ "->" ^ (tipo_str t2) ^ ")"
   | TyPair (t1,t2)  -> "("  ^ (tipo_str t1) ^  "*" ^ (tipo_str t2) ^ ")" 
   | TyVar  n        -> "X" ^ (string_of_int n)
-                             
+(* TRABALHO: NOVAS IMPRESSÕES *) 
+  | TyList t        -> (tipo_str t) ^ " List"
   
 
                              
@@ -76,8 +80,10 @@ type expr  =
   | App    of expr * expr
   | Let    of ident * expr * expr           
   | LetRec of ident * ident * expr * expr 
-              
-
+(* TRABALHO: NOVAS EXPRESSÕES *) 
+  | Nil
+  | Cons of expr * expr
+            
 
 
 (* impressão legível de expressão *)
@@ -109,8 +115,10 @@ let rec expr_str (e:expr) : string  =
   | Let (x,e1,e2) -> "(let " ^ x ^ "=" ^ (expr_str e1) ^ "\nin "
                      ^ (expr_str e2) ^ " )"
   | LetRec (f,x,e1,e2) -> "(let rec " ^ f ^ "= fn " ^ x ^ " => "
-                          ^ (expr_str e1) ^ "\nin " ^ (expr_str e2) ^ " )"
-                          
+                          ^ (expr_str e1) ^ "\nin " ^ (expr_str e2) ^ " )" 
+(* TRABALHO: NOVAS IMPRESSÕES *)
+  | Nil -> "[]"
+  | Cons (e1,e2) -> (expr_str e1) ^ "::" ^ (expr_str e2)
 
          
 (* ambientes de tipo - modificados para polimorfismo *) 
@@ -119,7 +127,7 @@ type tyenv = (ident * politipo) list
 
  
 (* calcula todas as variáveis de tipo livres
-   do ambiente de tipos *)          
+do ambiente de tipos *)          
 let rec ftv_amb' (g:tyenv) : int list =
   match g with
     []           -> []
@@ -137,9 +145,9 @@ type equacoes_tipo = (tipo * tipo) list
 (*
    a lista
        [ (t1,t2) ; (u1,u2) ]
-   representa o conjunto de equações de tipo
-       { t1=t2, u1=u2 }
- *)
+representa o conjunto de equações de tipo
+  { t1=t2, u1=u2 }
+*)
                  
 
 (* imprime equações *)
@@ -195,6 +203,8 @@ let rec appsubs (s:subst) (tp:tipo) : tipo =
   | TyVar  x        -> (match lookup s x with
         None        -> TyVar x
       | Some tp'    -> tp') 
+(* TRABALHO: NOVAS SUBSTITUIÇÕES *)
+  | TyList t1       -> TyList (appsubs s t1)
                          
   
 
@@ -221,7 +231,8 @@ let rec var_in_tipo (v:int) (tp:tipo) : bool =
   | TyFn     (t1,t2)  -> (var_in_tipo v t1) || (var_in_tipo v t2)
   | TyPair   (t1,t2)  -> (var_in_tipo v t1) || (var_in_tipo v t2) 
   | TyVar  x          -> v=x
-                         
+(* TRABALHO: NOVAS TESTAGENS DE OCORRÊNCIA DE VARIÁVEL *)
+  | TyList t          -> var_in_tipo v t
 
 (* cria novas variáveis para politipos quando estes são instanciados *)
                        
@@ -244,7 +255,9 @@ let rec unify (c:equacoes_tipo) : subst =
   | (TyFn(x1,y1),TyFn(x2,y2))::c'         -> unify ((x1,x2)::(y1,y2)::c')
   | (TyPair(x1,y1),TyPair(x2,y2))::c'     -> unify ((x1,x2)::(y1,y2)::c') 
   | (TyVar x1, TyVar x2)::c' when x1=x2   -> unify c'
-
+(* TRABALHO: NOVOS UNIFY *)
+  | (TyList tp1,TyList tp2)::c'            -> unify ((tp1,tp2)::c')
+(* Os matchs adicionados tem que ocorrer antes dos matchs abaixo*) 
   | (TyVar x1, tp2)::c'                  -> if var_in_tipo x1 tp2
       then raise (UnifyFail(TyVar x1, tp2))
       else compose
@@ -258,6 +271,8 @@ let rec unify (c:equacoes_tipo) : subst =
           [(x2,tp1)]
 
   | (tp1,tp2)::c' -> raise (UnifyFail(tp1,tp2))
+                       
+                                                
                        
                        
 
@@ -348,9 +363,33 @@ let rec collect (g:tyenv) (e:expr) : (equacoes_tipo * tipo)  =
       let g'       = (f,(polivars,tf1))::g                    in    
 
       let (c2,tp2) = collect g' e2                          in
-      (c1@[(tp1,TyVar tB)]@c2, tp2)
- 
+      (c1@[(tp1,TyVar tB)]@c2, tp2) 
       
+(* 
+   TRABALHO
+
+   COLEÇÕES ADICIONAIS A PARTIR DAQUI
+   VER SLIDE 167 PARA ALGUMAS REGRAS DE COLETA
+*)
+
+        (* E1 |> E2 *)
+        (* NIL | E1::E2 *) 
+  | Nil ->
+      let tA = newvar() in
+      ([], TyList (TyVar tA))
+     
+  | Cons (e1,e2) ->
+      let (c1,tp1) = collect g e1 in
+      let (c2,tp2) = collect g e2 in
+      (c1@c2@[(tp2,TyList tp1)], tp2)
+          
+
+        (* match e1 with nil => e2 | x::xs => e3 *)
+        (* nothing | just e *)
+        (* match e1 with nothing => e2 | just x => e3 *)
+        (* left e | right e *)
+        (* match e1 with left x => e2 | right y => e3 *) 
+
 
 (* INFERÊNCIA DE TIPOS - CHAMADA PRINCIPAL *)
        
@@ -360,14 +399,15 @@ let type_infer (e:expr) : unit =
   print_string "\n\n";
   try
     let (c,tp) = collect [] e  in
-    let s      = unify c       in
-    let tf     = appsubs s tp  in
     print_string "\nEquações de tipo coletadas:\n";
     print_equacoes c;
     print_string "Tipo inferido: ";    
     print_string (tipo_str tp);
-    print_string "\n\nSubstituição produzida por unify:\n";
+    print_string "\n";
+    let s      = unify c       in
+    print_string "\nSubstituição produzida por unify:\n";
     print_subst s;
+    let tf     = appsubs s tp  in
     print_string "Tipo inferido (após subs): ";
     print_string (tipo_str tf);
     print_string "\n\n"
@@ -395,6 +435,8 @@ type valor =
   | VPair  of valor * valor 
   | VClos  of ident * expr * renv
   | VRclos of ident * ident * expr * renv
+(* TRABALHO: NOVOS VALORES *)
+  | VList of valor list
 and
   renv = (ident * valor) list
    
@@ -475,8 +517,11 @@ let rec eval (renv:renv) (e:expr) : valor =
   | LetRec(f,x,e1,e2)  ->
       let renv'= update renv f (VRclos(f,x,e1,renv))
       in eval renv' e2
-       
-        
-
- 
- 
+(* TRABALHO: NOVAS AVALIAÇÕES *)
+  | Nil -> 
+      VList []
+  | Cons (e1, e2) ->
+      let v1 = eval renv e1 in
+      let v2 = eval renv e2 in
+      VList (v1 :: v2 :: [])
+               
