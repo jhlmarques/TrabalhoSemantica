@@ -84,6 +84,8 @@ type expr  =
   | Nil
   | Cons of expr * expr
   | Match of expr * expr * expr
+  | Nothing
+  | Just of expr
             
 
 
@@ -122,6 +124,8 @@ let rec expr_str (e:expr) : string  =
   | Cons (e1,e2) -> (expr_str e1) ^ "::" ^ (expr_str e2)
   | Match (e1,e2,e3) -> "(match " ^ (expr_str e1) ^ " with [] => "
                         ^ (expr_str e2) ^ " | x::xs => " ^ (expr_str e3) ^ " )"
+  | Nothing -> "nothing"
+  | Just e1 -> "(just " ^ (expr_str e1) ^ " )"
 
          
 (* ambientes de tipo - modificados para polimorfismo *) 
@@ -367,6 +371,7 @@ let rec collect (g:tyenv) (e:expr) : (equacoes_tipo * tipo)  =
 
       let (c2,tp2) = collect g' e2                          in
       (c1@[(tp1,TyVar tB)]@c2, tp2) 
+
       
 (* 
    TRABALHO
@@ -398,10 +403,18 @@ let rec collect (g:tyenv) (e:expr) : (equacoes_tipo * tipo)  =
       let (c3,tp3) = collect g e3 in
       (c1@c2@c3@[(tp1,TyList (TyVar tA));(tp2,TyVar tB);(tp3,TyVar tB)], tp2)
           
+  (* nothing | just e *)
+  | Nothing ->
+      let tA = newvar() in
+      ([], TyVar tA)
+
+  | Just e1 ->
+      let (c1,tp1) = collect g e1 in
+      let tA = newvar() in
+      (c1@[(tp1,TyVar tA)], TyVar tA)
 
 
 
-        (* nothing | just e *)
         (* match e1 with nothing => e2 | just x => e3 *)
         (* left e | right e *)
         (* match e1 with left x => e2 | right y => e3 *) 
@@ -547,3 +560,8 @@ let rec eval (renv:renv) (e:expr) : valor =
        | VList (v1 :: v2 :: []) ->
            eval renv e3
        | _ -> raise BugTypeInfer)
+
+  | Nothing ->
+      VList []
+  
+  | Just e1 ->
