@@ -384,7 +384,8 @@ let rec collect (g:tyenv) (e:expr) : (equacoes_tipo * tipo)  =
       (c1@c2@[(tp2,TyList tp1)], tp2)
           
 
-        (* match e1 with nil => e2 | x::xs => e3 *)
+
+
         (* nothing | just e *)
         (* match e1 with nothing => e2 | just x => e3 *)
         (* left e | right e *)
