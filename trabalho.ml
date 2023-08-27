@@ -83,6 +83,7 @@ type expr  =
 (* TRABALHO: NOVAS EXPRESSÕES *) 
   | Nil
   | Cons of expr * expr
+  | Match of expr * expr * expr
             
 
 
@@ -119,6 +120,8 @@ let rec expr_str (e:expr) : string  =
 (* TRABALHO: NOVAS IMPRESSÕES *)
   | Nil -> "[]"
   | Cons (e1,e2) -> (expr_str e1) ^ "::" ^ (expr_str e2)
+  | Match (e1,e2,e3) -> "(match " ^ (expr_str e1) ^ " with [] => "
+                        ^ (expr_str e2) ^ " | x::xs => " ^ (expr_str e3) ^ " )"
 
          
 (* ambientes de tipo - modificados para polimorfismo *) 
@@ -373,15 +376,27 @@ let rec collect (g:tyenv) (e:expr) : (equacoes_tipo * tipo)  =
 *)
 
         (* E1 |> E2 *)
-        (* NIL | E1::E2 *) 
+
+
+  (* NIL | E1::E2 *) 
   | Nil ->
       let tA = newvar() in
       ([], TyList (TyVar tA))
      
+
   | Cons (e1,e2) ->
       let (c1,tp1) = collect g e1 in
       let (c2,tp2) = collect g e2 in
       (c1@c2@[(tp2,TyList tp1)], tp2)
+      
+  (* match e1 with [] => e2 | x::xs => e3 *)
+  | Match (e1,e2,e3) ->
+      let tA = newvar() in
+      let tB = newvar() in
+      let (c1,tp1) = collect g e1 in
+      let (c2,tp2) = collect g e2 in
+      let (c3,tp3) = collect g e3 in
+      (c1@c2@c3@[(tp1,TyList (TyVar tA));(tp2,TyVar tB);(tp3,TyVar tB)], tp2)
           
 
 
@@ -525,4 +540,10 @@ let rec eval (renv:renv) (e:expr) : valor =
       let v1 = eval renv e1 in
       let v2 = eval renv e2 in
       VList (v1 :: v2 :: [])
-               
+
+  | Match (e1,e2,e3) ->
+      (match eval renv e1 with
+       | VList [] -> eval renv e2
+       | VList (v1 :: v2 :: []) ->
+           eval renv e3
+       | _ -> raise BugTypeInfer)
