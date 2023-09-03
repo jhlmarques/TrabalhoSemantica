@@ -512,8 +512,10 @@ type valor =
 (* TRABALHO: NOVOS VALORES *)
   | VList of valor list
   | VMaybe of valor option
-  | VEither of valor * valor
+  (* | VEither of valor option * valor option *)
   | VJust of valor
+  | VLeft of valor 
+  | VRight of valor 
 and
   renv = (ident * valor) list
 
@@ -627,16 +629,16 @@ let rec eval (renv:renv) (e:expr) : valor =
 
   | Left e1 ->
       let v1 = eval renv e1 in
-      VEither (v1, VNum 0)
+      VLeft (v1)
 
   | Right e1 ->
       let v1 = eval renv e1 in
-      VEither (VNum 0, v1)
+      VRight (v1)
 
   | MatchEither (e1,e2,e3) ->
       (match eval renv e1 with
-       | VEither (v1, v2) -> eval renv e2
-       | VEither (v1, v2) -> eval renv e3
+       | VLeft (va) -> eval renv e2
+       | VRight (vb) -> eval renv e3
        | _ -> raise BugTypeInfer)
 
   
@@ -700,14 +702,16 @@ type_infer(Nothing) *)
 type_infer(MatchMaybe (Nothing, Num 0, Num 1)) *)
 
 (* testing Left*)
-(* eval [] (Left (Num 1))
-type_infer(Left (Num 1)) *)
+eval [] (Left (Num 1))
+type_infer(Left (Num 1))
 
 (* testing Right*)
-(* eval [] (Right (Num 1))
-type_infer(Right (Num 1)) *)
+eval [] (Right (Num 1))
+type_infer(Right (Num 1))
 
 (* testing MatchEither*)
-(* eval [] (MatchEither (Left (Num 1), Num 0, Num 1))
-type_infer(MatchEither (Left (Num 1), Num 0, Num 1)) *)
+eval [] (MatchEither (Left (Num 1), Num 0, Num 1))
+type_infer(MatchEither (Left (Num 1), Num 0, Num 1))
 
+(*testing either with two different types*)
+eval [] (MatchEither (Left (Bool True), Num 0, Num 1.0))
