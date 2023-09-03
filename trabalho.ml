@@ -31,6 +31,8 @@ type tipo =
 
 (* TRABALHO: NOVOS TIPOS *)
   | TyList of tipo
+  | TyMaybe of tipo
+  | TyEither of tipo * tipo
 
 type politipo = (int list) * tipo
 
@@ -58,6 +60,8 @@ let rec tipo_str (tp:tipo) : string =
   | TyVar  n        -> "X" ^ (string_of_int n)
 (* TRABALHO: NOVAS IMPRESSÕES *)
   | TyList t        -> (tipo_str t) ^ " List"
+  | TyMaybe t       -> (tipo_str t) ^ " Maybe"
+  | TyEither (t1,t2) -> (tipo_str t1) ^ " | " ^ (tipo_str t2)
 
 
 
@@ -84,10 +88,13 @@ type expr  =
   | Pipe of expr * expr
   | Nil
   | Cons of expr * expr
-  | Match of expr * expr * expr
+  | MatchList of expr * expr * expr
   | Nothing
   | Just of expr
-            
+  | MatchMaybe of expr * expr * expr
+  | Left of expr
+  | Right of expr
+  | MatchEither of expr * expr * expr            
 
 
 (* impressão legível de expressão *)
@@ -124,10 +131,17 @@ let rec expr_str (e:expr) : string  =
   | Pipe (e1, e2) -> expr_str e1 ^ "|>" ^ expr_str e2
   | Nil -> "[]"
   | Cons (e1,e2) -> (expr_str e1) ^ "::" ^ (expr_str e2)
-  | Match (e1,e2,e3) -> "(match " ^ (expr_str e1) ^ " with [] => "
+  | MatchList (e1,e2,e3) -> "(match " ^ (expr_str e1) ^ " with [] => "
                         ^ (expr_str e2) ^ " | x::xs => " ^ (expr_str e3) ^ " )"
   | Nothing -> "nothing"
   | Just e1 -> "(just " ^ (expr_str e1) ^ " )"
+  | MatchMaybe (e1,e2,e3) -> "(match " ^ (expr_str e1) ^ " with nothing => "
+                        ^ (expr_str e2) ^ " | just x => " ^ (expr_str e3) ^ " )"
+  | Left e1 -> "(left " ^ (expr_str e1) ^ " )"
+  | Right e1 -> "(right " ^ (expr_str e1) ^ " )"
+  | MatchEither (e1,e2,e3) -> "(match " ^ (expr_str e1) ^ " with left x => "
+                        ^ (expr_str e2) ^ " | right y => " ^ (expr_str e3) ^ " )"
+
 
 
 (* ambientes de tipo - modificados para polimorfismo *)
@@ -214,6 +228,8 @@ let rec appsubs (s:subst) (tp:tipo) : tipo =
       | Some tp'    -> tp')
 (* TRABALHO: NOVAS SUBSTITUIÇÕES *)
   | TyList t1       -> TyList (appsubs s t1)
+  | TyMaybe t1      -> TyMaybe (appsubs s t1)
+  | TyEither (t1,t2) -> TyEither (appsubs s t1, appsubs s t2)
 
 
 
@@ -242,6 +258,8 @@ let rec var_in_tipo (v:int) (tp:tipo) : bool =
   | TyVar  x          -> v=x
 (* TRABALHO: NOVAS TESTAGENS DE OCORRÊNCIA DE VARIÁVEL *)
   | TyList t          -> var_in_tipo v t
+  | TyMaybe t         -> var_in_tipo v t
+  | TyEither (t1,t2)  -> (var_in_tipo v t1) || (var_in_tipo v t2)
 
 (* cria novas variáveis para politipos quando estes são instanciados *)
 
@@ -266,6 +284,8 @@ let rec unify (c:equacoes_tipo) : subst =
   | (TyVar x1, TyVar x2)::c' when x1=x2   -> unify c'
 (* TRABALHO: NOVOS UNIFY *)
   | (TyList tp1,TyList tp2)::c'            -> unify ((tp1,tp2)::c')
+  | (TyMaybe tp1,TyMaybe tp2)::c'          -> unify ((tp1,tp2)::c')
+  | (TyEither (x1,y1),TyEither (x2,y2))::c' -> unify ((x1,x2)::(y1,y2)::c')
 (* Os matchs adicionados tem que ocorrer antes dos matchs abaixo*)
   | (TyVar x1, tp2)::c'                  -> if var_in_tipo x1 tp2
       then raise (UnifyFail(TyVar x1, tp2))
@@ -387,6 +407,7 @@ TRABALHO
       let (c2,tp2) = collect  g e2 in
       let tA = newvar() in
       (c1@c2@[(tp2, TyFn(tp1, TyVar tA))], TyVar tA) (* Tipo T2 deve ser igual a T1->X *)
+
 (* NIL | E1::E2 *)
   | Nil ->
       let tA = newvar() in
@@ -396,31 +417,52 @@ TRABALHO
       let (c1,tp1) = collect g e1 in
       let (c2,tp2) = collect g e2 in
       (c1@c2@[(tp2,TyList tp1)], tp2)
-      
+
   (* match e1 with [] => e2 | x::xs => e3 *)
-  | Match (e1,e2,e3) ->
+  | MatchList (e1,e2,e3) ->
       let tA = newvar() in
-      let tB = newvar() in
       let (c1,tp1) = collect g e1 in
       let (c2,tp2) = collect g e2 in
       let (c3,tp3) = collect g e3 in
-      (c1@c2@c3@[(tp1,TyList (TyVar tA));(tp2,TyVar tB);(tp3,TyVar tB)], tp2)
-          
+      (c1@c2@c3@[(tp1,TyList (TyVar tA));(tp2, tp3)], tp2)     
+
   (* nothing | just e *)
   | Nothing ->
       let tA = newvar() in
-      ([], TyVar tA)
+      ([], TyMaybe (TyVar tA))
 
   | Just e1 ->
       let (c1,tp1) = collect g e1 in
+      (c1, TyMaybe tp1)
+
+  | MatchMaybe (e1,e2,e3) ->
       let tA = newvar() in
-      (c1@[(tp1,TyVar tA)], TyVar tA)
-
-
+      let (c1,tp1) = collect g e1 in
+      let (c2,tp2) = collect g e2 in
+      let (c3,tp3) = collect g e3 in
+      (c1@c2@c3@[(tp1,TyMaybe (TyVar tA));(tp2, tp3)], tp2)
 
         (* match e1 with nothing => e2 | just x => e3 *)
         (* left e | right e *)
         (* match e1 with left x => e2 | right y => e3 *) 
+
+  | Left e1 ->
+    let tA = newvar() in
+    let (c1,tp1) = collect g e1 in
+    (c1, TyEither (tp1,TyVar tA))
+
+  | Right e1 ->
+    let tA = newvar() in
+    let (c1,tp1) = collect g e1 in
+    (c1, TyEither (TyVar tA,tp1))
+
+  | MatchEither (e1,e2,e3) ->
+    let tA = newvar() in
+    let tB = newvar() in
+    let (c1,tp1) = collect g e1 in
+    let (c2,tp2) = collect g e2 in
+    let (c3,tp3) = collect g e3 in
+    (c1@c2@c3@[(tp1,TyEither (TyVar tA,TyVar tB));(tp2,tp3)],tp2)
 
 
 (* INFERÊNCIA DE TIPOS - CHAMADA PRINCIPAL *)
@@ -469,6 +511,9 @@ type valor =
   | VRclos of ident * ident * expr * renv
 (* TRABALHO: NOVOS VALORES *)
   | VList of valor list
+  | VMaybe of valor option
+  | VEither of valor * valor
+  | VJust of valor
 and
   renv = (ident * valor) list
 
@@ -559,7 +604,7 @@ let rec eval (renv:renv) (e:expr) : valor =
       let v2 = eval renv e2 in
       VList (v1 :: v2 :: [])
 
-  | Match (e1,e2,e3) ->
+  | MatchList (e1,e2,e3) ->
       (match eval renv e1 with
        | VList [] -> eval renv e2
        | VList (v1 :: v2 :: []) ->
@@ -567,11 +612,34 @@ let rec eval (renv:renv) (e:expr) : valor =
        | _ -> raise BugTypeInfer)
 
   | Nothing ->
-      VList []
-  
+      VMaybe None
+
   | Just e1 ->
+      let v1 = eval renv e1 in
+      VMaybe (Some v1)
 
+  | MatchMaybe (e1,e2,e3) ->
+      (match eval renv e1 with
+       | VMaybe None -> eval renv e2
+       | VMaybe (Some v1) ->
+            eval renv e3
+       | _ -> raise BugTypeInfer)
 
+  | Left e1 ->
+      let v1 = eval renv e1 in
+      VEither (v1, VNum 0)
+
+  | Right e1 ->
+      let v1 = eval renv e1 in
+      VEither (VNum 0, v1)
+
+  | MatchEither (e1,e2,e3) ->
+      (match eval renv e1 with
+       | VEither (v1, v2) -> eval renv e2
+       | VEither (v1, v2) -> eval renv e3
+       | _ -> raise BugTypeInfer)
+
+  
 
 
 
@@ -597,3 +665,49 @@ let ebdy =  Fn("y", If(Binop(Eq, Var "y", Num 0) , Num 1, xp))
 
 let ex1 =
   LetRec("pow", "x", ebdy, Pipe(Num 4, Pipe(Num 3, Var "pow")))
+
+  (* test nothing *)
+let ex2 = LetRec("pow", "x", ebdy, Pipe(Num 4, Pipe(Num 3, Nothing)))
+
+(* test just *)
+let ex3 = LetRec("pow", "x", ebdy, Pipe(Num 4, Pipe(Num 3, Just (Num 2))))
+
+(* test match *)
+let ex4 = LetRec("pow", "x", ebdy, Pipe(Num 4, Pipe(Num 3, MatchList(Var "x", Num 0, Num 1))))
+
+(* testing cons*)
+(* eval [] (Cons( Num 1, (Cons (Num 2, (Cons (Num 3, Nil))))))
+type_infer(Cons( Num 1, (Cons (Num 2, (Cons (Num 3, Nil)))))) *)
+
+(* testing MatchWnil*)
+(* eval [] (MatchList ((Cons( Num 1, (Cons (Num 2, (Cons (Num 3, Nil)))))), Num 0, Num 1))
+
+eval [] (MatchList (Nil, Num 0, Num 1))
+
+type_infer(MatchList ((Cons( Num 1, (Cons (Num 2, (Cons (Num 3, Nil)))))), Num 0, Num 1)) *)
+
+(*testing Just*)
+(* eval [] (Just (Num 1))
+type_infer(Just (Num 1)) *)
+
+(*testing Nothing*)
+(* eval [] (Nothing)
+type_infer(Nothing) *)
+
+
+(* testinf MatchMaybe*)
+(* eval [] (MatchMaybe (Nothing, Num 0, Num 1))
+type_infer(MatchMaybe (Nothing, Num 0, Num 1)) *)
+
+(* testing Left*)
+(* eval [] (Left (Num 1))
+type_infer(Left (Num 1)) *)
+
+(* testing Right*)
+(* eval [] (Right (Num 1))
+type_infer(Right (Num 1)) *)
+
+(* testing MatchEither*)
+(* eval [] (MatchEither (Left (Num 1), Num 0, Num 1))
+type_infer(MatchEither (Left (Num 1), Num 0, Num 1)) *)
+
