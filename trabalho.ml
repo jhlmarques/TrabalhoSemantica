@@ -86,6 +86,7 @@ type expr  =
   | LetRec of ident * ident * expr * expr
 (* TRABALHO: NOVAS EXPRESSÕES *)
   | Pipe of expr * expr
+  | PipeRec of expr * expr
   | Nil
   | Cons of expr * expr
   | MatchList of expr * expr * expr
@@ -129,6 +130,7 @@ let rec expr_str (e:expr) : string  =
                           ^ (expr_str e1) ^ "\nin " ^ (expr_str e2) ^ " )"
 (* TRABALHO: NOVAS IMPRESSÕES *)
   | Pipe (e1, e2) -> expr_str e1 ^ "|>" ^ expr_str e2
+  | PipeRec (e1, e2) -> expr_str e1 ^ "|>^" ^ expr_str e2
   | Nil -> "[]"
   | Cons (e1,e2) -> (expr_str e1) ^ "::" ^ (expr_str e2)
   | MatchList (e1,e2,e3) -> "(match " ^ (expr_str e1) ^ " with [] => "
@@ -408,6 +410,13 @@ TRABALHO
       let tA = newvar() in
       (c1@c2@[(tp2, TyFn(tp1, TyVar tA))], TyVar tA) (* Tipo T2 deve ser igual a T1->X *)
 
+  | PipeRec (e1,e2) ->
+      let (c1,tp1) = collect  g e1 in
+      let (c2,tp2) = collect  g e2  in
+      let tA       = newvar()       in
+      (c1@c2@[(tp1,TyFn(tp2,TyVar tA))]
+      , TyVar tA)
+
 (* NIL | E1::E2 *)
   | Nil ->
       let tA = newvar() in
@@ -599,6 +608,19 @@ let rec eval (renv:renv) (e:expr) : valor =
 (* TRABALHO: NOVAS AVALIAÇÕES *)
   | Pipe (e1, e2) ->
       eval renv (App(e2, e1))
+  | PipeRec (e1, e2) ->
+    let v1 = eval renv e1 in
+    let v2 = eval renv e2 in
+    (match v1 with
+       VClos(x,ebdy,renv') ->
+         let renv'' = update renv' x v2
+         in eval renv'' ebdy
+
+     | VRclos(f,x,ebdy,renv') ->
+         let renv''  = update renv' x v2 in
+         let renv''' = update renv'' f v1
+         in eval renv''' ebdy
+     | _ -> raise BugTypeInfer)
   | Nil ->
       VList []
   | Cons (e1, e2) ->
@@ -702,16 +724,16 @@ type_infer(Nothing) *)
 type_infer(MatchMaybe (Nothing, Num 0, Num 1)) *)
 
 (* testing Left*)
-eval [] (Left (Num 1))
-type_infer(Left (Num 1))
+(* eval [] (Left (Num 1)) *)
+(* type_infer(Left (Num 1)) *)
 
 (* testing Right*)
-eval [] (Right (Num 1))
-type_infer(Right (Num 1))
+(* eval [] (Right (Num 1)) *)
+(* type_infer(Right (Num 1)) *)
 
 (* testing MatchEither*)
-eval [] (MatchEither (Left (Num 1), Num 0, Num 1))
-type_infer(MatchEither (Left (Num 1), Num 0, Num 1))
+(* eval [] (MatchEither (Left (Num 1), Num 0, Num 1)) *)
+(* type_infer(MatchEither (Left (Num 1), Num 0, Num 1)) *)
 
 (*testing either with two different types*)
-eval [] (MatchEither (Left (Bool True), Num 0, Num 1.0))
+(* eval [] (MatchEither (Left (Bool True), Num 0, Num 1.0)) *)
